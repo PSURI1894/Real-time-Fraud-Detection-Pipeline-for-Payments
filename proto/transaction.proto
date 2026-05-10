@@ -1,10 +1,1 @@
-syntax = "proto3";
-package payments.fraud;
-
-option go_package = "github.com/payments/fraud/proto";
-
-message TransactionEvent {
-  string card_id = 1;
-  double amount = 2;
-  int64 event_ts = 3;
-}
+proto/transaction.proto
