@@ -1,0 +1,6 @@
+project: fraud_features
+registry: data/registry.db
+provider: local
+online_store:
+  type: redis
+  connection_string: redis://localhost:6379
