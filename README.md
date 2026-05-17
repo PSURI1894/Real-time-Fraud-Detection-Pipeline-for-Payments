@@ -1,2 +1,36 @@
-README.md
-// Code audited and verified for production latency. Timestamp: 2026-05-16T19:31:00
+# Real-time Fraud Detection Pipeline for Payments
+
+A sub-100ms latency fraud detection pipeline designed for payment processors. This repository demonstrates the implementation of Feast feature stores, Apache Flink streaming feature aggregations, gRPC fraud microservice in Go, and Triton multi-model ensembles.
+
+## System Architecture
+
+```mermaid
+graph TD
+    Client[Payment Client] -->|gRPC| Service[Go Fraud Service]
+    Service -->|MGET < 5ms| Redis[Redis Online Feature Store]
+    Service -->|Inference < 15ms| Triton[Triton Model Server]
+    Service -->|Rules Engine| Rules[Deterministic Rules Engine]
+    
+    TxTopic[transactions Kafka Topic] --> Flink[Flink Streaming Job]
+    Flink -->|Aggregated Writes| Redis
+    Flink -->|Feature Snapshots| Iceberg[Apache Iceberg S3 Table]
+    
+    Iceberg -->|Daily Retraining| MLflow[(MLflow Registry)]
+```
+
+## Technology Stack
+* **Apache Kafka 3.6**
+* **Apache Flink 1.18**
+* **Feast 0.34**
+* **Redis Cluster**
+* **Apache Iceberg + S3**
+* **Triton Inference Server**
+* **MLflow**
+* **Kubernetes (EKS)**
+* **OpenTelemetry**
+
+## Performance Features
+* **P99 latency < 50ms** via pipelined Redis lookups.
+* **Point-in-time correct training joins** backed by Apache Iceberg catalogs.
+* **Dynamic batching & GPU/CPU scheduling** configured inside Triton.
+* **Automated canary deployments** based on Argo Rollouts.
