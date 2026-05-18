@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-service
+  namespace: payment-security
+spec:
+  replicas: 10
+  selector:
+    matchLabels:
+      app: fraud-service
+  template:
+    metadata:
+      labels:
+        app: fraud-service
+    spec:
+      containers:
+      - name: fraud-service
+        image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/fraud-service:v1.0.0
+        ports:
+        - containerPort: 50051
+        resources:
+          limits:
+            cpu: "2"
+            memory: 4Gi
+          requests:
+            cpu: "500m"
+            memory: 1Gi
