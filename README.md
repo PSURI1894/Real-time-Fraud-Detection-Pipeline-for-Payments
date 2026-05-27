@@ -34,3 +34,5 @@ graph TD
 * **Point-in-time correct training joins** backed by Apache Iceberg catalogs.
 * **Dynamic batching & GPU/CPU scheduling** configured inside Triton.
 * **Automated canary deployments** based on Argo Rollouts.
+
+<!-- Build Audit ID: 1000 -->
