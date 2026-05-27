@@ -1,446 +1,176 @@
 # Real-time Fraud Detection Pipeline for Payments
 
-A sub-100ms latency fraud detection pipeline designed for payment processors. This repository demonstrates the implementation of Feast feature stores, Apache Flink streaming feature aggregations, gRPC fraud microservice in Go, and Triton multi-model ensembles.
+A production-grade, sub-100ms latency fraud detection pipeline designed for payments processors. This project illustrates the modern MLOps and Data Engineering paradigms required to compute streaming aggregates, host online/offline feature registries, orchestrate multi-model serving, and trigger automated retraining loops based on concept drift observability.
 
-## System Architecture
+---
+
+## 1. End-to-End System Architecture
+
+The architecture is divided into two distinct processing planes:
+
+1. **Synchronous Decision Plane (Sub-50ms Budget)**:
+   * **Merchant Request**: Arrives via gRPC (`FraudService.CheckTransaction`) containing raw transaction features.
+   * **Feast Online Registry Lookup**: Fraud Service queries a multi-AZ **Redis Cluster** using connection pooling and pipelining. Fetches ~120 time-windowed entity features (e.g., `recent_card_velocity_1m`, `card_amount_sum_1h`) in a single batch read.
+   * **Triton Scoring Ensemble**: Features are serialized and dispatched to **Triton Inference Server**. Triton schedules scoring dynamically using a pipeline ensemble of **XGBoost** (tuned for CPU efficiency) and **TabNet** (Pytorch neural model hosted on GPU).
+   * **Rules Engine DSL**: Validates deterministic guardrails in parallel (e.g., country mismatches, absolute limit checks).
+   * **Decision Action**: Decisions (APPROVE, DECLINED, REVIEW) return synchronously to the payment gateway.
+   * **Decision Logger**: The request-decision tuple is published asynchronously to the `decisions` Kafka topic.
+
+2. **Asynchronous Streaming & Retraining Plane**:
+   * **Flink Processing**: An **Apache Flink** streaming job consumes transaction logs from Kafka, maintaining event-time state windows to calculate sliding velocity features. It updates the online Redis store using clustered pipeline writes and dumps cold snapshots into an **Apache Iceberg** S3 Lakehouse catalog.
+   * **Label MAT Maturity**: A PySpark job runs nightly, joining chargeback/refund events (which mature over 60-90 days) with past decision logs using point-in-time (PIT) correct joins.
+   * **Drift & Retrain Registry**: Computes statistical population drift. If thresholds are breached, Airflow triggers automated model retraining in XGBoost/TabNet, updating the **MLflow Registry** and triggering Argo Rollout canaries.
 
 ```mermaid
 graph TD
-    Client[Payment Client] -->|gRPC| Service[Go Fraud Service]
-    Service -->|MGET < 5ms| Redis[Redis Online Feature Store]
-    Service -->|Inference < 15ms| Triton[Triton Model Server]
-    Service -->|Rules Engine| Rules[Deterministic Rules Engine]
+    %% Synchronous Path
+    Client[Payment Client] -->|gRPC CheckTransaction| Service[Go Fraud Service]
+    Service -->|Pipelined MGET < 5ms| Redis[(Redis Cluster Online)]
+    Service -->|Ensemble gRPC < 15ms| Triton[Triton Inference Server]
+    Service -->|DSL Evaluation < 2ms| Rules[Rules Engine]
+    Service -->|Return Decision| Client
     
-    TxTopic[transactions Kafka Topic] --> Flink[Flink Streaming Job]
-    Flink -->|Aggregated Writes| Redis
-    Flink -->|Feature Snapshots| Iceberg[Apache Iceberg S3 Table]
+    %% Asynchronous Logging
+    Service -->|Async Publish| Kafka[Kafka decisions Topic]
     
-    Iceberg -->|Daily Retraining| MLflow[(MLflow Registry)]
+    %% Aggregations & Storage
+    Kafka --> Flink[Flink Streaming Job]
+    Flink -->|Sliding Windows Upserts| Redis
+    Flink -->|Event-Time Snapshots| Iceberg[(Apache Iceberg Offline Store)]
+    
+    %% Retraining Loop
+    Iceberg -->|Historical PIT Joins| Spark[Spark Label Pipeline]
+    Spark -->|Matured Dataset| Airflow{Airflow Orchestrator}
+    Airflow -->|Daily Retraining| MLflow[(MLflow Model Registry)]
+    MLflow -->|Canary Promote| Triton
 ```
 
-## Technology Stack
-* **Apache Kafka 3.6**
-* **Apache Flink 1.18**
-* **Feast 0.34**
-* **Redis Cluster**
-* **Apache Iceberg + S3**
-* **Triton Inference Server**
-* **MLflow**
-* **Kubernetes (EKS)**
-* **OpenTelemetry**
-
-## Performance Features
-* **P99 latency < 50ms** via pipelined Redis lookups.
-* **Point-in-time correct training joins** backed by Apache Iceberg catalogs.
-* **Dynamic batching & GPU/CPU scheduling** configured inside Triton.
-* **Automated canary deployments** based on Argo Rollouts.
-
-<!-- Build Audit ID: 1000 -->
-
-<!-- Build Audit ID: 1001 -->
-
-<!-- Build Audit ID: 1002 -->
-
-<!-- Build Audit ID: 1003 -->
-
-<!-- Build Audit ID: 1004 -->
-
-<!-- Build Audit ID: 1005 -->
-
-<!-- Build Audit ID: 1006 -->
-
-<!-- Build Audit ID: 1007 -->
-
-<!-- Build Audit ID: 1008 -->
-
-<!-- Build Audit ID: 1009 -->
-
-<!-- Build Audit ID: 1010 -->
-
-<!-- Build Audit ID: 1011 -->
-
-<!-- Build Audit ID: 1012 -->
-
-<!-- Build Audit ID: 1013 -->
-
-<!-- Build Audit ID: 1014 -->
-
-<!-- Build Audit ID: 1015 -->
-
-<!-- Build Audit ID: 1016 -->
-
-<!-- Build Audit ID: 1017 -->
-
-<!-- Build Audit ID: 1018 -->
-
-<!-- Build Audit ID: 1019 -->
-
-<!-- Build Audit ID: 1020 -->
-
-<!-- Build Audit ID: 1021 -->
-
-<!-- Build Audit ID: 1022 -->
-
-<!-- Build Audit ID: 1023 -->
-
-<!-- Build Audit ID: 1024 -->
-
-<!-- Build Audit ID: 1025 -->
-
-<!-- Build Audit ID: 1026 -->
-
-<!-- Build Audit ID: 1027 -->
-
-<!-- Build Audit ID: 1028 -->
-
-<!-- Build Audit ID: 1029 -->
-
-<!-- Build Audit ID: 1030 -->
-
-<!-- Build Audit ID: 1031 -->
-
-<!-- Build Audit ID: 1032 -->
-
-<!-- Build Audit ID: 1033 -->
-
-<!-- Build Audit ID: 1034 -->
-
-<!-- Build Audit ID: 1035 -->
-
-<!-- Build Audit ID: 1036 -->
-
-<!-- Build Audit ID: 1037 -->
-
-<!-- Build Audit ID: 1038 -->
-
-<!-- Build Audit ID: 1039 -->
-
-<!-- Build Audit ID: 1040 -->
-
-<!-- Build Audit ID: 1041 -->
-
-<!-- Build Audit ID: 1042 -->
-
-<!-- Build Audit ID: 1043 -->
-
-<!-- Build Audit ID: 1044 -->
-
-<!-- Build Audit ID: 1045 -->
-
-<!-- Build Audit ID: 1046 -->
-
-<!-- Build Audit ID: 1047 -->
-
-<!-- Build Audit ID: 1048 -->
-
-<!-- Build Audit ID: 1049 -->
-
-<!-- Build Audit ID: 1050 -->
-
-<!-- Build Audit ID: 1051 -->
-
-<!-- Build Audit ID: 1052 -->
-
-<!-- Build Audit ID: 1053 -->
-
-<!-- Build Audit ID: 1054 -->
-
-<!-- Build Audit ID: 1055 -->
-
-<!-- Build Audit ID: 1056 -->
-
-<!-- Build Audit ID: 1057 -->
-
-<!-- Build Audit ID: 1058 -->
-
-<!-- Build Audit ID: 1059 -->
-
-<!-- Build Audit ID: 1060 -->
-
-<!-- Build Audit ID: 1061 -->
-
-<!-- Build Audit ID: 1062 -->
-
-<!-- Build Audit ID: 1063 -->
-
-<!-- Build Audit ID: 1064 -->
-
-<!-- Build Audit ID: 1065 -->
-
-<!-- Build Audit ID: 1066 -->
-
-<!-- Build Audit ID: 1067 -->
-
-<!-- Build Audit ID: 1068 -->
-
-<!-- Build Audit ID: 1069 -->
-
-<!-- Build Audit ID: 1070 -->
-
-<!-- Build Audit ID: 1071 -->
-
-<!-- Build Audit ID: 1072 -->
-
-<!-- Build Audit ID: 1073 -->
-
-<!-- Build Audit ID: 1074 -->
-
-<!-- Build Audit ID: 1075 -->
-
-<!-- Build Audit ID: 1076 -->
-
-<!-- Build Audit ID: 1077 -->
-
-<!-- Build Audit ID: 1078 -->
-
-<!-- Build Audit ID: 1079 -->
-
-<!-- Build Audit ID: 1080 -->
-
-<!-- Build Audit ID: 1081 -->
-
-<!-- Build Audit ID: 1082 -->
-
-<!-- Build Audit ID: 1083 -->
-
-<!-- Build Audit ID: 1084 -->
-
-<!-- Build Audit ID: 1085 -->
-
-<!-- Build Audit ID: 1086 -->
-
-<!-- Build Audit ID: 1087 -->
-
-<!-- Build Audit ID: 1088 -->
-
-<!-- Build Audit ID: 1089 -->
-
-<!-- Build Audit ID: 1090 -->
-
-<!-- Build Audit ID: 1091 -->
-
-<!-- Build Audit ID: 1092 -->
-
-<!-- Build Audit ID: 1093 -->
-
-<!-- Build Audit ID: 1094 -->
-
-<!-- Build Audit ID: 1095 -->
-
-<!-- Build Audit ID: 1096 -->
-
-<!-- Build Audit ID: 1097 -->
-
-<!-- Build Audit ID: 1098 -->
-
-<!-- Build Audit ID: 1099 -->
-
-<!-- Build Audit ID: 1100 -->
-
-<!-- Build Audit ID: 1101 -->
-
-<!-- Build Audit ID: 1102 -->
-
-<!-- Build Audit ID: 1103 -->
-
-<!-- Build Audit ID: 1104 -->
-
-<!-- Build Audit ID: 1105 -->
-
-<!-- Build Audit ID: 1106 -->
-
-<!-- Build Audit ID: 1107 -->
-
-<!-- Build Audit ID: 1108 -->
-
-<!-- Build Audit ID: 1109 -->
-
-<!-- Build Audit ID: 1110 -->
-
-<!-- Build Audit ID: 1111 -->
-
-<!-- Build Audit ID: 1112 -->
-
-<!-- Build Audit ID: 1113 -->
-
-<!-- Build Audit ID: 1114 -->
-
-<!-- Build Audit ID: 1115 -->
-
-<!-- Build Audit ID: 1116 -->
-
-<!-- Build Audit ID: 1117 -->
-
-<!-- Build Audit ID: 1118 -->
-
-<!-- Build Audit ID: 1119 -->
-
-<!-- Build Audit ID: 1120 -->
-
-<!-- Build Audit ID: 1121 -->
-
-<!-- Build Audit ID: 1122 -->
-
-<!-- Build Audit ID: 1123 -->
-
-<!-- Build Audit ID: 1124 -->
-
-<!-- Build Audit ID: 1125 -->
-
-<!-- Build Audit ID: 1126 -->
-
-<!-- Build Audit ID: 1127 -->
-
-<!-- Build Audit ID: 1128 -->
-
-<!-- Build Audit ID: 1129 -->
-
-<!-- Build Audit ID: 1130 -->
-
-<!-- Build Audit ID: 1131 -->
-
-<!-- Build Audit ID: 1132 -->
-
-<!-- Build Audit ID: 1133 -->
-
-<!-- Build Audit ID: 1134 -->
-
-<!-- Build Audit ID: 1135 -->
-
-<!-- Build Audit ID: 1136 -->
-
-<!-- Build Audit ID: 1137 -->
-
-<!-- Build Audit ID: 1138 -->
-
-<!-- Build Audit ID: 1139 -->
-
-<!-- Build Audit ID: 1140 -->
-
-<!-- Build Audit ID: 1141 -->
-
-<!-- Build Audit ID: 1142 -->
-
-<!-- Build Audit ID: 1143 -->
-
-<!-- Build Audit ID: 1144 -->
-
-<!-- Build Audit ID: 1145 -->
-
-<!-- Build Audit ID: 1146 -->
-
-<!-- Build Audit ID: 1147 -->
-
-<!-- Build Audit ID: 1148 -->
-
-<!-- Build Audit ID: 1149 -->
-
-<!-- Build Audit ID: 1150 -->
-
-<!-- Build Audit ID: 1151 -->
-
-<!-- Build Audit ID: 1152 -->
-
-<!-- Build Audit ID: 1153 -->
-
-<!-- Build Audit ID: 1154 -->
-
-<!-- Build Audit ID: 1155 -->
-
-<!-- Build Audit ID: 1156 -->
-
-<!-- Build Audit ID: 1157 -->
-
-<!-- Build Audit ID: 1158 -->
-
-<!-- Build Audit ID: 1159 -->
-
-<!-- Build Audit ID: 1160 -->
-
-<!-- Build Audit ID: 1161 -->
-
-<!-- Build Audit ID: 1162 -->
-
-<!-- Build Audit ID: 1163 -->
-
-<!-- Build Audit ID: 1164 -->
-
-<!-- Build Audit ID: 1165 -->
-
-<!-- Build Audit ID: 1166 -->
-
-<!-- Build Audit ID: 1167 -->
-
-<!-- Build Audit ID: 1168 -->
-
-<!-- Build Audit ID: 1169 -->
-
-<!-- Build Audit ID: 1170 -->
-
-<!-- Build Audit ID: 1171 -->
-
-<!-- Build Audit ID: 1172 -->
-
-<!-- Build Audit ID: 1173 -->
-
-<!-- Build Audit ID: 1174 -->
-
-<!-- Build Audit ID: 1175 -->
-
-<!-- Build Audit ID: 1176 -->
-
-<!-- Build Audit ID: 1177 -->
-
-<!-- Build Audit ID: 1178 -->
-
-<!-- Build Audit ID: 1179 -->
-
-<!-- Build Audit ID: 1180 -->
-
-<!-- Build Audit ID: 1181 -->
-
-<!-- Build Audit ID: 1182 -->
-
-<!-- Build Audit ID: 1183 -->
-
-<!-- Build Audit ID: 1184 -->
-
-<!-- Build Audit ID: 1185 -->
-
-<!-- Build Audit ID: 1186 -->
-
-<!-- Build Audit ID: 1187 -->
-
-<!-- Build Audit ID: 1188 -->
-
-<!-- Build Audit ID: 1189 -->
-
-<!-- Build Audit ID: 1190 -->
-
-<!-- Build Audit ID: 1191 -->
-
-<!-- Build Audit ID: 1192 -->
-
-<!-- Build Audit ID: 1193 -->
-
-<!-- Build Audit ID: 1194 -->
-
-<!-- Build Audit ID: 1195 -->
-
-<!-- Build Audit ID: 1196 -->
-
-<!-- Build Audit ID: 1197 -->
-
-<!-- Build Audit ID: 1198 -->
-
-<!-- Build Audit ID: 1199 -->
-
-<!-- Build Audit ID: 1200 -->
-
-<!-- Build Audit ID: 1201 -->
-
-<!-- Build Audit ID: 1202 -->
-
-<!-- Build Audit ID: 1203 -->
-
-<!-- Build Audit ID: 1204 -->
+---
+
+## 2. Low-Latency Performance Budgets
+
+Every millisecond counts when assessing merchant requests. Below is our target budget at peak loads (50,000 requests/sec):
+
+| Service Hop / Pipeline Segment | p50 Latency | p95 Latency | p99 Latency | Architectural Performance Pattern |
+|---|---|---|---|---|
+| **Redis Feature Lookup** | 1.8 ms | 3.2 ms | 4.8 ms | Clustered connection pool, pipelined `MGET` with Go channel multiplexing. |
+| **Triton Ensemble Scoring** | 6.5 ms | 10.5 ms | 14.5 ms | Triton dynamic batching, CPU/GPU instance co-location, shared memory. |
+| **Rules Engine DSL** | 0.4 ms | 0.9 ms | 1.5 ms | In-process execution in Go, pre-compiled rule structs, concurrent routines. |
+| **Serialization Overhead** | 0.2 ms | 0.5 ms | 0.9 ms | gRPC Keep-Alives, Protocol Buffers, Go `sync.Pool` byte-buffer recyclers. |
+| **Total Synchronous Budget** | **8.9 ms** | **15.1 ms** | **21.7 ms** | Combined decision returned to caller. Budget window < 50ms p99 is met. |
+
+---
+
+## 3. Data Model & Storage Schemas
+
+To prevent training-serving feature skew, the repository utilizes unified schemas across all storage layers.
+
+### 3.1. Redis Online Cache Hashes
+* **Key Format**: `entity:card_id:{<card_id>}` (Hashtags ensure hash key co-location on the same cluster shard).
+  * `recent_card_velocity_1m` (Int64): Total card charges in last 60 seconds (TTL: 60s).
+  * `card_amount_sum_1h` (Float64): Total transaction amount sum in last hour (TTL: 3600s).
+* **Key Format**: `entity:merchant_id:{<merchant_id>}`
+  * `merchant_chargeback_rate_24h` (Float64): Percentage of chargebacks in last 24 hours (TTL: 86400s).
+
+### 3.2. Decisions Iceberg Catalog
+Historical event logs used for audit trails and point-in-time training sets:
+
+```sql
+CREATE TABLE iceberg.fraud_offline.decisions (
+    decision_id STRING,
+    event_ts TIMESTAMP,
+    card_id STRING,
+    merchant_id STRING,
+    device_id STRING,
+    amount DOUBLE,
+    decision STRING,
+    model_version STRING,
+    rule_versions ARRAY<STRING>,
+    feature_snapshot MAP<STRING, DOUBLE>,
+    latency_ms DOUBLE
+) 
+USING iceberg 
+PARTITIONED BY (days(event_ts));
+```
+
+### 3.3. Labeled Target Table
+Matured target labels gathered after the 60-day chargeback clearing window:
+
+```sql
+CREATE TABLE iceberg.fraud_offline.labels (
+    chargeback_id STRING,
+    decision_id STRING,
+    label INT, -- 1 for Fraud, 0 for Legitimate
+    label_ts TIMESTAMP
+) 
+USING iceberg;
+```
+
+---
+
+## 4. Observability, Skew & Drift Metrics
+
+Model decay is monitored in real time using statistical checks.
+
+### 4.1. Population Stability Index (PSI)
+Calculated daily comparing live model inference scores with the model's baseline training distributions:
+
+$$PSI = \sum_{k=1}^{10} \left( (Actual\%_k - Expected\%_k) \times \ln\left(\frac{Actual\%_k}{Expected\%_k}\right) \right)$$
+
+* **PSI < 0.1**: Stable. No changes.
+* **PSI >= 0.1 and < 0.2**: Slight drift warning. Alerts Prometheus.
+* **PSI >= 0.2**: Actionable Concept Drift. Triggers Airflow ad-hoc training pipelines automatically.
+
+### 4.2. Automated Training-Serving Skew Verification
+Our daily continuous integration suite runs `skew_test.py` to assert that features fetched from the online Redis Cluster match features retrieved from the Iceberg history for identical transactions. The suite fails if the Mean Absolute Error (MAE) exceeds `0.05` (5%).
+
+---
+
+## 5. Local Sandbox Runbook
+
+You can run the entire fraud stack locally inside Docker.
+
+### 5.1. Spin Up Core Infrastructure
+Start Kafka, Redis, and Triton model servers:
+```bash
+docker-compose up -d
+```
+
+### 5.2. Compile & Run Flink Aggregations
+Build the streaming JAR and submit it to a local Flink cluster:
+```bash
+cd streaming-feature-pipeline
+mvn clean package
+# Submit JAR to Flink TaskManager
+flink run -c com.payments.fraud.FlinkStreamingJob target/streaming-feature-pipeline-1.0.0.jar
+```
+
+### 5.3. Initialize Feast Store Definitions
+Register feature definitions locally:
+```bash
+cd ../feature-store
+feast apply
+```
+
+### 5.4. Compile and Run gRPC Fraud Service
+Navigate to the Go service and start the server:
+```bash
+cd ../fraud-service
+go build -o fraud_server .
+./fraud_server
+```
+
+---
+
+## 6. CI/CD & Traffic Deployment
+
+1. **GitHub Actions (`.github/workflows/`)**:
+   * Compiles and tests Go microservices with static analyzers.
+   * Compiles the Flink Java application and packages the JAR.
+   * Builds and lint-checks Triton configurations.
+
+2. **Argo Canary Deployments**:
+   * Argo Rollouts coordinates deployments incrementally:
+     * **5% Traffic**: Shadow/Canary testing. Verifies p99 latency does not spike and `PR-AUC` metrics logged to MLflow remain stable.
+     * **25% Traffic**: Active live scoring with automated validation webhooks.
+     * **100% Traffic**: Final promotion. Any spike in decline rates or error counts triggers automatic rollbacks.
