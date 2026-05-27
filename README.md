@@ -115,7 +115,7 @@ Model decay is monitored in real time using statistical checks.
 ### 4.1. Population Stability Index (PSI)
 Calculated daily comparing live model inference scores with the model's baseline training distributions:
 
-$$PSI = \sum_{k=1}^{10} \left( (Actual\%_k - Expected\%_k) \times \ln\left(\frac{Actual\%_k}{Expected\%_k}\right) \right)$$
+$$PSI = \sum_{k=1}^{10} \left( (Actual_{pct, k} - Expected_{pct, k}) \times \ln\left(\frac{Actual_{pct, k}}{Expected_{pct, k}}\right) \right)$$
 
 * **PSI < 0.1**: Stable. No changes.
 * **PSI >= 0.1 and < 0.2**: Slight drift warning. Alerts Prometheus.
